@@ -1,0 +1,35 @@
+Banco de dados: Cauã
+Stavation: Bruno - Bruno - Alenxandre
+front-end: Gustavo
+Lista de prioridade: Diogo - Tayna
+teste - final - todos
+
+1. A Base e os Dados Falsos (O Alicerce)
+
+A Missão: Preparar o terreno para o sistema funcionar.
+
+O que a pessoa vai fazer: Criar as tabelas lá no Supabase para guardar as senhas. Além disso, essa pessoa vai programar um "gerador automático de clientes" (usando aquela ferramenta Faker). Isso é essencial porque vocês vão precisar de uma fila com umas 500 pessoas de mentira para testar se o sistema aguenta, sem precisar ficar digitando nome por nome.
+
+2. O Cérebro da Fila (A Lógica)
+
+A Missão: Fazer a matemática da lei funcionar na prática.
+
+O que a pessoa vai fazer: Essa pessoa não vai mexer com tela nem com banco de dados. O foco é 100% no algoritmo que decide quem é o próximo. Ela vai criar a regra exata de chamar "3 superprioridades, 2 prioridades padrão e 1 normal", garantindo que a fila ande no ritmo certo e ninguém fique travado esperando para sempre.
+
+3. O Visual e a Tela (A Cara do Projeto)
+
+A Missão: Deixar tudo bonito e usável para quem vai clicar.
+
+O que a pessoa vai fazer: Construir a interface usando o Streamlit. É desenhar o layout separando a tela em duas partes principais: o painel grande que parece uma "TV de banco" mostrando a senha atual, e a tela do caixa, onde o funcionário clica no botão "Chamar Próximo". O foco aqui é a experiência do usuário.
+
+4. A Ponte (O Faz-Tudo da Integração)
+
+A Missão: Ligar o botão da tela ao cérebro e ao banco de dados.
+
+O que a pessoa vai fazer: Fazer as partes conversarem. Quando o caixa apertar "Chamar Próximo" na tela (Feita pela Frente 3), essa pessoa garante que o aviso vá lá no Cérebro (Frente 2) para descobrir quem é o próximo, e depois mande um aviso para o Banco de Dados (Frente 1) mudar o status do cliente para "atendido".
+
+5. O Testador Chato e Organização Final (Controle de Qualidade)
+
+A Missão: Tentar quebrar o sistema e deixar a casa arrumada para a entrega.
+
+O que a pessoa vai fazer: Essa pessoa vai fazer tudo que o usuário não deveria fazer, como clicar no botão 50 vezes rápido, ou testar o que acontece se a fila de idosos esvaziar do nada. Ela garante que a lei está sendo cumprida em qualquer cenário. Também fica responsável por organizar o documento de como usar o programa e colocar o sistema no ar na internet.
