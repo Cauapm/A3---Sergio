@@ -1,0 +1,21 @@
+# Environment variables
+.env
+*.env
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# Supabase CLI local
+supabase/.branches/
+supabase/.temp/
+
+# IDE / System
+.vscode/
+.idea/
+.remember/

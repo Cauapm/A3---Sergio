@@ -1,0 +1,20 @@
+# Configuração do Supabase CLI.
+# Valores omitidos usam os padrões do CLI.
+project_id = "fila-bancaria"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+
+[db]
+port = 54322
+major_version = 15
+
+[db.seed]
+enabled = true
+sql_paths = ["./seed.sql"]
+
+[studio]
+enabled = true
+port = 54323
