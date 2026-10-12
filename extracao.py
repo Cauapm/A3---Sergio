@@ -12,5 +12,11 @@ def extrair_url():
 
     return url
 
+def converter_pandas(url):
+    df = pd.read_json(url)
+    df = df.drop(columns=["id","id_motivo"])
+    return df
+
 if __name__ == "__main__":
     url = extrair_url()
+    print(converter_pandas(url))
