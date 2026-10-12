@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
 import pandas as pd
-
+pd.set_option('display.max_columns', None)
 load_dotenv()
 
 def extrair_url():
@@ -16,6 +16,9 @@ def converter_pandas(url):
     df = pd.read_json(url)
     df = df.drop(columns=["id","id_motivo"])
     return df
+
+def starvartion(df):
+    df = df.sort_values(by='nivel_prioridade')
 
 if __name__ == "__main__":
     url = extrair_url()
