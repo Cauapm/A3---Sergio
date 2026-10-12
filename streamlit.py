@@ -26,9 +26,6 @@ def get_supabase():
             "ou nos Secrets do Streamlit Cloud."
         )
         st.stop()
-    if "supabase.com/dashboard/project/" in url:
-        project_ref = url.rstrip("/").split("/")[-1]
-        url = f"https://{project_ref}.supabase.co"
     return create_client(url, key)
 
 
