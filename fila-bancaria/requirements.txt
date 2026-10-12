@@ -1,4 +1,0 @@
-streamlit
-supabase
-python-dotenv
-faker
