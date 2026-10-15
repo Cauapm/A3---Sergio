@@ -1,19 +1,11 @@
 from collections import deque
-from typing import Optional, Protocol, List
-from modelos import Cliente, NivelPrioridade
+from datetime import datetime
+from typing import Optional, Any
+from uuid import uuid4
+import pandas as pd
 
-
-class ProtocoloRepositorio(Protocol):
-    """Contrato (DIP) que a Frente 1 cumpre com o Supabase.
-
-    Semântica de registrar_chamada():
-        Persiste a transição correspondente a 'cliente foi chamado'.
-        O valor exato gravado é decisão da Frente 1, alinhada com o
-        schema. O Gerenciador não assume qual é.
-    """
-    def inserir(self, cliente: Cliente) -> None: ...
-    def registrar_chamada(self, cliente_id: str) -> None: ...
-    def listar_aguardando(self) -> List[Cliente]: ...
+from modelos import Cliente, NivelPrioridade, StatusCliente
+from extracao import ExtratorFila
 
 
 class GerenciadorFilas:
@@ -27,38 +19,80 @@ class GerenciadorFilas:
 
         O que ele NÃO garante: SLA temporal ("ninguém espera X min").
 
-    Ordem de operações (importante):
-        - adicionar_cliente(): persiste PRIMEIRO, enfileira depois.
-          "Se não está no banco, não está na fila."
-        - chamar_proximo(): tira da fila, tenta persistir; se falhar,
-          restaura fila E contadores (a tentativa não consome quantum).
+    Ordem de operações:
+        - carregar_fila() / sincronizar_estado(): extrai os dados via ExtratorFila
+          (do extracao.py) e popula as filas em memória respeitando a ordem
+          de chegada (FIFO) e as prioridades legais.
+        - chamar_proximo(): retira o próximo cliente elegível de acordo com
+          o escalonamento 3:2:1 (Superprioridade : Prioridade Padrão : Convencional).
     """
 
     QUANTUM_SUPER = 3
     QUANTUM_PADRAO = 2
 
-    def __init__(self, repositorio: Optional[ProtocoloRepositorio] = None):
+    def __init__(
+        self,
+        extrator: Optional[ExtratorFila] = None,
+        auto_carregar: bool = False,
+        repositorio: Optional[Any] = None,
+    ):
         self._fila_super: deque[Cliente] = deque()
         self._fila_padrao: deque[Cliente] = deque()
         self._fila_convencional: deque[Cliente] = deque()
 
         self._contador_super: int = 0
         self._contador_padrao: int = 0
+        self._extrator = extrator if extrator is not None else ExtratorFila()
         self._repositorio = repositorio
 
+        if repositorio is not None:
+            auto_carregar = False
+
+        if auto_carregar:
+            self.carregar_fila()
+
     # ------------------------------------------------------------------ #
+    def carregar_fila(self, df: Optional[pd.DataFrame] = None) -> None:
+        """Carrega e repovoa as filas em memória a partir dos dados do extracao.py."""
+        if df is None:
+            if self._extrator is None:
+                self._extrator = ExtratorFila()
+            df = self._extrator.converter_pandas()
+
+        self._fila_super.clear()
+        self._fila_padrao.clear()
+        self._fila_convencional.clear()
+        self._resetar_contadores()
+
+        if df is None or df.empty:
+            return
+
+        # Filtra apenas clientes que estão aguardando
+        if "status" in df.columns:
+            df = df[df["status"].astype(str).str.strip().str.lower() == "aguardando"]
+
+        # Garante a ordem de chegada (FIFO) dentro de cada prioridade
+        if "data_chegada" in df.columns:
+            df = df.sort_values(by="data_chegada")
+
+        for _, row in df.iterrows():
+            cliente = self._converter_linha_para_cliente(row)
+            self._fila_para(cliente.nivel_prioridade).append(cliente)
+
+    def sincronizar_estado(self) -> None:
+        """Repovoa as filas em memória a partir do extracao.py (compatibilidade)."""
+        self.carregar_fila()
+
     def adicionar_cliente(self, cliente: Cliente) -> None:
-        """Persiste primeiro, enfileira depois. Se o banco falhar, o
-        cliente NÃO entra na fila em memória — evita divergência silenciosa."""
-        if self._repositorio is not None:
+        """Adiciona um cliente diretamente à fila de prioridade correspondente."""
+        if self._repositorio is not None and hasattr(self._repositorio, "inserir"):
             self._repositorio.inserir(cliente)
 
         self._fila_para(cliente.nivel_prioridade).append(cliente)
 
     def chamar_proximo(self) -> Optional[Cliente]:
-        """Retira o próximo cliente elegível e notifica o repositório.
-        Se a persistência falhar, restaura fila E contadores — a tentativa
-        que falhou não consome posição no ciclo 3:2:1."""
+        """Retira o próximo cliente elegível segundo o ciclo 3:2:1.
+        Caso exista um repositório configurado, notifica a chamada com rollback local se falhar."""
         contador_super_antes = self._contador_super
         contador_padrao_antes = self._contador_padrao
 
@@ -66,12 +100,10 @@ class GerenciadorFilas:
         if cliente is None:
             return None
 
-        if self._repositorio is not None:
+        if self._repositorio is not None and hasattr(self._repositorio, "registrar_chamada"):
             try:
                 self._repositorio.registrar_chamada(cliente.id)
             except Exception:
-                # Restaura o estado exato de antes da seleção.
-                # Recuperação LOCAL — não é transação distribuída.
                 self._contador_super = contador_super_antes
                 self._contador_padrao = contador_padrao_antes
                 self._fila_para(cliente.nivel_prioridade).appendleft(cliente)
@@ -106,17 +138,6 @@ class GerenciadorFilas:
         return self._selecionar_proximo()
 
     # ------------------------------------------------------------------ #
-    def sincronizar_estado(self) -> None:
-        """Repovoa as filas em memória a partir do estado salvo no banco."""
-        if self._repositorio is None:
-            return
-        self._fila_super.clear()
-        self._fila_padrao.clear()
-        self._fila_convencional.clear()
-        for cliente in self._repositorio.listar_aguardando():
-            self._fila_para(cliente.nivel_prioridade).append(cliente)
-
-    # ------------------------------------------------------------------ #
     # Introspecção
     # ------------------------------------------------------------------ #
     def tamanhos(self) -> dict:
@@ -142,11 +163,46 @@ class GerenciadorFilas:
     # ------------------------------------------------------------------ #
     # Internos
     # ------------------------------------------------------------------ #
+    def _converter_linha_para_cliente(self, row) -> Cliente:
+        """Converte uma linha do DataFrame gerado pelo ExtratorFila em objeto Cliente."""
+        data_chegada = row.get("data_chegada")
+        if isinstance(data_chegada, str):
+            try:
+                data_chegada = datetime.fromisoformat(data_chegada)
+            except Exception:
+                data_chegada = datetime.now()
+        elif isinstance(data_chegada, pd.Timestamp):
+            data_chegada = data_chegada.to_pydatetime()
+        elif not isinstance(data_chegada, datetime):
+            data_chegada = datetime.now()
+
+        status_val = str(row.get("status", "aguardando")).strip().lower()
+        try:
+            status_enum = StatusCliente(status_val)
+        except ValueError:
+            status_enum = StatusCliente.AGUARDANDO
+
+        try:
+            nivel = NivelPrioridade(int(row["nivel_prioridade"]))
+        except (ValueError, TypeError, KeyError):
+            nivel = NivelPrioridade.CONVENCIONAL
+
+        cliente_id = str(row.get("id") or row.get("cpf") or uuid4())
+
+        return Cliente(
+            id=cliente_id,
+            nome=str(row.get("nome", "Sem Nome")),
+            nivel_prioridade=nivel,
+            motivo=str(row.get("motivo", "")),
+            data_chegada=data_chegada,
+            status=status_enum,
+        )
+
     def _fila_para(self, nivel: NivelPrioridade) -> deque:
         """Devolve a fila correta para o nível de prioridade informado."""
-        if nivel == NivelPrioridade.SUPER_PRIORIDADE:
+        if nivel == NivelPrioridade.SUPER_PRIORIDADE or nivel == 0:
             return self._fila_super
-        if nivel == NivelPrioridade.PRIORIDADE_PADRAO:
+        if nivel == NivelPrioridade.PRIORIDADE_PADRAO or nivel == 1:
             return self._fila_padrao
         return self._fila_convencional
 
@@ -158,3 +214,24 @@ class GerenciadorFilas:
         """Zera os contadores do ciclo (Passo 4 do algoritmo 3:2:1)."""
         self._contador_super = 0
         self._contador_padrao = 0
+
+
+if __name__ == "__main__":
+    gerenciador = GerenciadorFilas(auto_carregar=True)
+    print("--- Filas Carregadas a partir do extracao.py ---")
+    print("Tamanhos das filas:", gerenciador.tamanhos())
+    print("Contadores:", gerenciador.estado_contadores())
+    print("Fase atual:", gerenciador.fase_atual())
+
+    print("\n--- Simulação de Chamadas (Ciclo 3:2:1) ---")
+    for i in range(1, 11):
+        cliente = gerenciador.chamar_proximo()
+        if not cliente:
+            print(f"Chamada {i}: Ninguém na fila.")
+            break
+        print(f"Chamada {i:02d}: {cliente.nome:<25} | Prioridade: {cliente.nivel_prioridade.name:<18} | Motivo: {cliente.motivo}")
+
+    print("\n--- Estado após chamadas ---")
+    print("Tamanhos restantes:", gerenciador.tamanhos())
+    print("Contadores atuais:", gerenciador.estado_contadores())
+    print("Próxima fase:", gerenciador.fase_atual())

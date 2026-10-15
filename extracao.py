@@ -23,17 +23,8 @@ class ExtratorFila:
         self.df = self.df.drop(columns=["id", "id_motivo"], errors="ignore")
         return self.df
 
-    def aplicar_starvation(self):
-        self.df = self.df.sort_values(by="nivel_prioridade")
-        return self.df
-
-
 if __name__ == "__main__":
     extrator = ExtratorFila()
     df = extrator.converter_pandas()
     print("--- Dados Brutos (amostra) ---")
-    print(df.head())
-
-    print("\n--- Dados Ordenados por Prioridade (amostra) ---")
-    df_prioridade = extrator.aplicar_starvation()
-    print(df_prioridade.head())
+    print(df.head(10))
