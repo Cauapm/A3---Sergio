@@ -1,6 +1,5 @@
 import os
 import unittest
-from datetime import datetime, timezone
 import pandas as pd
 
 from modelos import Cliente, NivelPrioridade, StatusCliente
@@ -53,19 +52,20 @@ def _cliente(nome, nivel):
     return Cliente.criar(nome, nivel, "teste")
 
 
-class TesteCiclo321(unittest.TestCase):
+class TestePrioridadeAbsolutaECiclo21(unittest.TestCase):
 
-    def test_ciclo_321_com_filas_cheias(self):
+    def test_prioridade_absoluta_80_mais_e_ciclo_21(self):
         gerenciador = GerenciadorFilas()
-        for i in range(3):
+        for i in range(4):
             gerenciador.adicionar_cliente(_cliente(f"S{i}", NivelPrioridade.SUPER_PRIORIDADE))
         for i in range(3):
             gerenciador.adicionar_cliente(_cliente(f"P{i}", NivelPrioridade.PRIORIDADE_PADRAO))
         for i in range(3):
             gerenciador.adicionar_cliente(_cliente(f"C{i}", NivelPrioridade.CONVENCIONAL))
 
-        ordem = [gerenciador.chamar_proximo().nivel_prioridade for _ in range(6)]
+        ordem = [gerenciador.chamar_proximo().nivel_prioridade for _ in range(7)]
         self.assertEqual(ordem, [
+            NivelPrioridade.SUPER_PRIORIDADE,
             NivelPrioridade.SUPER_PRIORIDADE,
             NivelPrioridade.SUPER_PRIORIDADE,
             NivelPrioridade.SUPER_PRIORIDADE,
@@ -73,6 +73,23 @@ class TesteCiclo321(unittest.TestCase):
             NivelPrioridade.PRIORIDADE_PADRAO,
             NivelPrioridade.CONVENCIONAL,
         ])
+
+    def test_super_nao_altera_contador_do_ciclo_21(self):
+        gerenciador = GerenciadorFilas()
+        gerenciador.adicionar_cliente(_cliente("P0", NivelPrioridade.PRIORIDADE_PADRAO))
+        gerenciador.adicionar_cliente(_cliente("P1", NivelPrioridade.PRIORIDADE_PADRAO))
+        gerenciador.adicionar_cliente(_cliente("C0", NivelPrioridade.CONVENCIONAL))
+
+        # Chama o primeiro padrão (contador fica 1/2)
+        self.assertEqual(gerenciador.chamar_proximo().nome, "P0")
+
+        # Chega um 80+ no meio do ciclo: deve ser atendido imediatamente sem resetar o ciclo 2:1
+        gerenciador.adicionar_cliente(_cliente("S0", NivelPrioridade.SUPER_PRIORIDADE))
+        self.assertEqual(gerenciador.chamar_proximo().nome, "S0")
+
+        # Retoma o ciclo 2:1 exatamente de onde parou (P1 e depois C0)
+        self.assertEqual(gerenciador.chamar_proximo().nome, "P1")
+        self.assertEqual(gerenciador.chamar_proximo().nome, "C0")
 
 
 class TesteFIFO(unittest.TestCase):
@@ -85,15 +102,17 @@ class TesteFIFO(unittest.TestCase):
         chamados = [gerenciador.chamar_proximo().nome for _ in range(5)]
         self.assertEqual(chamados, nomes)
 
-    def test_fifo_super_com_intercalacao(self):
+    def test_fifo_super_e_intercalacao_21(self):
         gerenciador = GerenciadorFilas()
-        for nome in ["S1", "S2", "S3", "S4"]:
+        for nome in ["S1", "S2"]:
             gerenciador.adicionar_cliente(_cliente(nome, NivelPrioridade.SUPER_PRIORIDADE))
         for nome in ["P1", "P2", "P3"]:
             gerenciador.adicionar_cliente(_cliente(nome, NivelPrioridade.PRIORIDADE_PADRAO))
+        for nome in ["C1", "C2"]:
+            gerenciador.adicionar_cliente(_cliente(nome, NivelPrioridade.CONVENCIONAL))
 
         ordem = [gerenciador.chamar_proximo().nome for _ in range(5)]
-        self.assertEqual(ordem, ["S1", "S2", "S3", "P1", "P2"])
+        self.assertEqual(ordem, ["S1", "S2", "P1", "P2", "C1"])
 
 
 class TesteFilasVazias(unittest.TestCase):
@@ -125,14 +144,18 @@ class TesteFilasVazias(unittest.TestCase):
 
 class TesteAntiInanicao(unittest.TestCase):
 
-    def test_anti_inanicao_sob_pico_de_super(self):
+    def test_anti_inanicao_sob_pico_de_padrao(self):
         gerenciador = GerenciadorFilas()
         for i in range(100):
-            gerenciador.adicionar_cliente(_cliente(f"S{i}", NivelPrioridade.SUPER_PRIORIDADE))
+            gerenciador.adicionar_cliente(_cliente(f"P{i}", NivelPrioridade.PRIORIDADE_PADRAO))
         gerenciador.adicionar_cliente(_cliente("C1", NivelPrioridade.CONVENCIONAL))
 
-        niveis = [gerenciador.chamar_proximo().nivel_prioridade for _ in range(4)]
-        self.assertIn(NivelPrioridade.CONVENCIONAL, niveis)
+        niveis = [gerenciador.chamar_proximo().nivel_prioridade for _ in range(3)]
+        self.assertEqual(niveis, [
+            NivelPrioridade.PRIORIDADE_PADRAO,
+            NivelPrioridade.PRIORIDADE_PADRAO,
+            NivelPrioridade.CONVENCIONAL,
+        ])
 
 
 class TesteStatus(unittest.TestCase):
@@ -146,7 +169,7 @@ class TesteStatus(unittest.TestCase):
 
 
 class TesteIntegracaoExtracao(unittest.TestCase):
-    """Testes de integração entre o ExtratorFila (extracao.py) e o GerenciadorFilas."""
+    """Testes de integração entre o ExtratorFila (extracao.py), Alexandre.py e o GerenciadorFilas."""
 
     def test_carregamento_com_extrator_falso(self):
         extrator = ExtratorFalso()
@@ -174,7 +197,6 @@ class TesteIntegracaoExtracao(unittest.TestCase):
         self.assertIsNone(gerenciador.chamar_proximo())
 
     def test_ordenacao_fifo_por_data_chegada(self):
-        # Inseridos propositalmente fora de ordem temporal
         dados = [
             {"nome": "Terceiro", "cpf": "333", "nivel_prioridade": 2, "motivo": "C", "status": "aguardando", "data_chegada": "2026-10-09T10:15:00"},
             {"nome": "Primeiro", "cpf": "111", "nivel_prioridade": 2, "motivo": "C", "status": "aguardando", "data_chegada": "2026-10-09T10:05:00"},
@@ -186,10 +208,10 @@ class TesteIntegracaoExtracao(unittest.TestCase):
         ordem_chamada = [gerenciador.chamar_proximo().nome for _ in range(3)]
         self.assertEqual(ordem_chamada, ["Primeiro", "Segundo", "Terceiro"])
 
-    def test_ciclo_321_com_dados_extrator(self):
-        # 4 super, 3 padrao, 2 convencional no extrator
+    def test_regra_alexandre_com_dados_extrator(self):
+        # 2 super (prioridade absoluta), 3 padrao, 2 convencional (ciclo 2:1)
         dados = []
-        for i in range(4):
+        for i in range(2):
             dados.append({"nome": f"S{i}", "cpf": f"S{i}", "nivel_prioridade": 0, "motivo": "S", "status": "aguardando", "data_chegada": f"2026-10-09T10:0{i}:00"})
         for i in range(3):
             dados.append({"nome": f"P{i}", "cpf": f"P{i}", "nivel_prioridade": 1, "motivo": "P", "status": "aguardando", "data_chegada": f"2026-10-09T10:1{i}:00"})
@@ -200,7 +222,7 @@ class TesteIntegracaoExtracao(unittest.TestCase):
         gerenciador = GerenciadorFilas(extrator=extrator, auto_carregar=True)
 
         chamados = [gerenciador.chamar_proximo().nome for _ in range(6)]
-        self.assertEqual(chamados, ["S0", "S1", "S2", "P0", "P1", "C0"])
+        self.assertEqual(chamados, ["S0", "S1", "P0", "P1", "C0", "P2"])
 
     def test_sincronizar_estado_recarrega_dados(self):
         extrator = ExtratorFalso()
@@ -218,7 +240,10 @@ class TesteIntegracaoExtracao(unittest.TestCase):
             self.skipTest("SUPABASE_URL ou SUPABASE_KEY não configuradas no .env")
 
         extrator = ExtratorFila()
-        df = extrator.converter_pandas()
+        try:
+            df = extrator.converter_pandas()
+        except Exception as exc:
+            self.skipTest(f"Conexão de rede indisponível para o Supabase: {exc}")
         self.assertIsInstance(df, pd.DataFrame)
 
         gerenciador = GerenciadorFilas(extrator=extrator, auto_carregar=True)
@@ -226,7 +251,6 @@ class TesteIntegracaoExtracao(unittest.TestCase):
         total_fila = sum(tamanhos.values())
         self.assertGreaterEqual(total_fila, 0)
 
-        # Se houver clientes aguardando no banco, chamar_proximo deve retornar um Cliente tipado
         if total_fila > 0:
             cliente = gerenciador.chamar_proximo()
             self.assertIsInstance(cliente, Cliente)
