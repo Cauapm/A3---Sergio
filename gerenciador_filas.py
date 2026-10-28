@@ -6,29 +6,28 @@ import pandas as pd
 
 from modelos import Cliente, NivelPrioridade, StatusCliente
 from extracao import ExtratorFila
+from Alexandre import aplicar_starvation
 
 
 class GerenciadorFilas:
-    """Coração do sistema: três deques + escalonamento com pesos 3:2:1.
+    """Coração do sistema: três deques + escalonamento com prioridade absoluta
+    para 80+ e ciclo anti-inanição 2:1 entre Prioridade Padrão e Convencional
+    (utilizando a função aplicar_starvation do Alexandre.py).
 
-    Comportamento do ciclo:
-        A fila convencional recebe 1 chamada a cada bloco de
-        (até 3 super + até 2 padrão). Filas vazias têm seu quantum
-        pulado — o ciclo ENCURTA em vez de desperdiçar chamadas.
-        Isso garante anti-inanição da fila convencional.
-
-        O que ele NÃO garante: SLA temporal ("ninguém espera X min").
+    Comportamento do escalonamento:
+        - Superprioridade (80+ anos): atendida sempre primeiro com prioridade
+          absoluta (FIFO), sem alterar nem reiniciar o contador do ciclo 2:1.
+        - Ciclo 2:1 (Padrão : Convencional): quando a fila 80+ está vazia,
+          atende até 2 clientes da fila Padrão para 1 da fila Convencional.
+          Filas vazias têm sua etapa avançada sem desperdiçar chamadas.
 
     Ordem de operações:
         - carregar_fila() / sincronizar_estado(): extrai os dados via ExtratorFila
           (do extracao.py) e popula as filas em memória respeitando a ordem
           de chegada (FIFO) e as prioridades legais.
-        - chamar_proximo(): retira o próximo cliente elegível de acordo com
-          o escalonamento 3:2:1 (Superprioridade : Prioridade Padrão : Convencional).
+        - chamar_proximo(): aplica aplicar_starvation() (de Alexandre.py)
+          para retirar o próximo cliente elegível.
     """
-
-    QUANTUM_SUPER = 3
-    QUANTUM_PADRAO = 2
 
     def __init__(
         self,
@@ -40,8 +39,11 @@ class GerenciadorFilas:
         self._fila_padrao: deque[Cliente] = deque()
         self._fila_convencional: deque[Cliente] = deque()
 
-        self._contador_super: int = 0
-        self._contador_padrao: int = 0
+        self._etapa: int = 0
+        self._contador: int = 0
+        self._limites: tuple = (2, 1)
+        self._filas_ciclo = (self._fila_padrao, self._fila_convencional)
+
         self._extrator = extrator if extrator is not None else ExtratorFila()
         self._repositorio = repositorio
 
@@ -80,23 +82,53 @@ class GerenciadorFilas:
             self._fila_para(cliente.nivel_prioridade).append(cliente)
 
     def sincronizar_estado(self) -> None:
-        """Repovoa as filas em memória a partir do extracao.py (compatibilidade)."""
+        """Repovoa as filas em memória a partir do extracao.py (ou repositório legado)."""
+        if self._repositorio is not None and hasattr(self._repositorio, "listar_aguardando"):
+            clientes = list(self._repositorio.listar_aguardando())
+            novas_filas = (deque(), deque(), deque())
+            for cliente in clientes:
+                indice = int(cliente.nivel_prioridade)
+                if indice not in (0, 1, 2):
+                    raise ValueError("Prioridade inválida.")
+                novas_filas[indice].append(cliente)
+            self._fila_super.clear()
+            self._fila_padrao.clear()
+            self._fila_convencional.clear()
+            for destino, origem in zip(
+                (self._fila_super, self._fila_padrao, self._fila_convencional), novas_filas
+            ):
+                destino.extend(origem)
+            self._resetar_contadores()
+            return
+
         self.carregar_fila()
 
     def adicionar_cliente(self, cliente: Cliente) -> None:
         """Adiciona um cliente diretamente à fila de prioridade correspondente."""
+        fila = self._fila_para(cliente.nivel_prioridade)
         if self._repositorio is not None and hasattr(self._repositorio, "inserir"):
             self._repositorio.inserir(cliente)
 
-        self._fila_para(cliente.nivel_prioridade).append(cliente)
+        fila.append(cliente)
 
     def chamar_proximo(self) -> Optional[Cliente]:
-        """Retira o próximo cliente elegível segundo o ciclo 3:2:1.
+        """Retira o próximo cliente elegível aplicando a função aplicar_starvation
+        do Alexandre.py (80+ prioridade absoluta + ciclo 2:1).
         Caso exista um repositório configurado, notifica a chamada com rollback local se falhar."""
-        contador_super_antes = self._contador_super
-        contador_padrao_antes = self._contador_padrao
+        etapa_anterior = self._etapa
+        contador_anterior = self._contador
 
-        cliente = self._selecionar_proximo()
+        cliente, fila, nova_etapa, novo_contador = aplicar_starvation(
+            self._fila_super,
+            self._fila_padrao,
+            self._fila_convencional,
+            self._etapa,
+            self._contador,
+            self._limites,
+        )
+        self._etapa = nova_etapa
+        self._contador = novo_contador
+
         if cliente is None:
             return None
 
@@ -104,38 +136,12 @@ class GerenciadorFilas:
             try:
                 self._repositorio.registrar_chamada(cliente.id)
             except Exception:
-                self._contador_super = contador_super_antes
-                self._contador_padrao = contador_padrao_antes
-                self._fila_para(cliente.nivel_prioridade).appendleft(cliente)
+                self._etapa = etapa_anterior
+                self._contador = contador_anterior
+                fila.appendleft(cliente)
                 raise
 
         return cliente
-
-    def _selecionar_proximo(self) -> Optional[Cliente]:
-        """Aplica o ciclo 3:2:1 e devolve o próximo cliente, ou None
-        se todas as filas estiverem vazias."""
-        if not self._tem_alguem():
-            self._resetar_contadores()
-            return None
-
-        if self._fila_super and self._contador_super < self.QUANTUM_SUPER:
-            cliente = self._fila_super.popleft()
-            self._contador_super += 1
-            return cliente
-
-        if self._fila_padrao and self._contador_padrao < self.QUANTUM_PADRAO:
-            cliente = self._fila_padrao.popleft()
-            self._contador_padrao += 1
-            return cliente
-
-        if self._fila_convencional:
-            cliente = self._fila_convencional.popleft()
-            self._resetar_contadores()
-            return cliente
-
-        # Nenhuma fila elegível neste instante: reinicia ciclo e tenta de novo.
-        self._resetar_contadores()
-        return self._selecionar_proximo()
 
     # ------------------------------------------------------------------ #
     # Introspecção
@@ -149,16 +155,18 @@ class GerenciadorFilas:
         }
 
     def estado_contadores(self) -> dict:
-        """Retorna o valor atual dos contadores do ciclo 3:2:1."""
-        return {"super": self._contador_super, "padrao": self._contador_padrao}
+        """Retorna o valor atual dos contadores do ciclo 2:1."""
+        return {
+            "padrao": self._contador if self._etapa == 0 else 2,
+            "convencional": self._contador if self._etapa == 1 else 0,
+        }
 
     def fase_atual(self) -> str:
-        """Indica em qual etapa do ciclo 3:2:1 estamos — apenas inspeção."""
-        if self._contador_super < self.QUANTUM_SUPER:
-            return f"super ({self._contador_super}/{self.QUANTUM_SUPER})"
-        if self._contador_padrao < self.QUANTUM_PADRAO:
-            return f"padrao ({self._contador_padrao}/{self.QUANTUM_PADRAO})"
-        return "convencional (próxima chamada)"
+        """Indica em qual etapa estamos (super absoluta ou ciclo 2:1)."""
+        if self._fila_super:
+            return "super (prioridade absoluta)"
+        nomes = ("padrao", "convencional")
+        return f"{nomes[self._etapa]} ({self._contador}/{self._limites[self._etapa]})"
 
     # ------------------------------------------------------------------ #
     # Internos
@@ -204,34 +212,50 @@ class GerenciadorFilas:
             return self._fila_super
         if nivel == NivelPrioridade.PRIORIDADE_PADRAO or nivel == 1:
             return self._fila_padrao
-        return self._fila_convencional
+        if nivel == NivelPrioridade.CONVENCIONAL or nivel == 2:
+            return self._fila_convencional
+        raise ValueError("Prioridade inválida.")
 
     def _tem_alguem(self) -> bool:
         """True se houver pelo menos um cliente em qualquer uma das filas."""
         return bool(self._fila_super or self._fila_padrao or self._fila_convencional)
 
     def _resetar_contadores(self) -> None:
-        """Zera os contadores do ciclo (Passo 4 do algoritmo 3:2:1)."""
-        self._contador_super = 0
-        self._contador_padrao = 0
+        """Zera a etapa e o contador do ciclo 2:1."""
+        self._etapa = 0
+        self._contador = 0
 
 
-if __name__ == "__main__":
+def prova_funcionamento_padrao() -> None:
+    """Função temporária de prova do funcionamento padrão conectada ao Supabase."""
     gerenciador = GerenciadorFilas(auto_carregar=True)
-    print("--- Filas Carregadas a partir do extracao.py ---")
+    print("--- [gerenciador_filas.py] Filas Carregadas a partir do extracao.py ---")
     print("Tamanhos das filas:", gerenciador.tamanhos())
-    print("Contadores:", gerenciador.estado_contadores())
+    print("Contadores (ciclo 2:1):", gerenciador.estado_contadores())
     print("Fase atual:", gerenciador.fase_atual())
 
-    print("\n--- Simulação de Chamadas (Ciclo 3:2:1) ---")
-    for i in range(1, 11):
+    print("\n--- Simulação de Chamadas (80+ Prioridade Absoluta + Ciclo 2:1) ---")
+    for i in range(1, 13):
         cliente = gerenciador.chamar_proximo()
         if not cliente:
-            print(f"Chamada {i}: Ninguém na fila.")
+            print(f"Chamada {i:02d}: Ninguém na fila.")
             break
-        print(f"Chamada {i:02d}: {cliente.nome:<25} | Prioridade: {cliente.nivel_prioridade.name:<18} | Motivo: {cliente.motivo}")
+        print(
+            f"Chamada {i:02d}: {cliente.nome:<25} | "
+            f"Prioridade: {cliente.nivel_prioridade.name:<18} | "
+            f"Motivo: {cliente.motivo}"
+        )
 
     print("\n--- Estado após chamadas ---")
     print("Tamanhos restantes:", gerenciador.tamanhos())
     print("Contadores atuais:", gerenciador.estado_contadores())
     print("Próxima fase:", gerenciador.fase_atual())
+
+
+if __name__ == "__main__":
+    prova_funcionamento_padrao()
+
+
+if __name__ == "__main__":
+    prova_funcionamento_padrao()
+
