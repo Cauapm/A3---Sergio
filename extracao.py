@@ -27,4 +27,4 @@ if __name__ == "__main__":
     extrator = ExtratorFila()
     df = extrator.converter_pandas()
     print("--- Dados Brutos (amostra) ---")
-    print(df.head(10))
+    print(df.head(30))
