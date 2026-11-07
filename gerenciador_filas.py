@@ -54,8 +54,10 @@ class GerenciadorFilas:
             self.carregar_fila()
 
     # ------------------------------------------------------------------ #
-    def carregar_fila(self, df: Optional[pd.DataFrame] = None) -> None:
-        """Carrega e repovoa as filas em memória a partir dos dados do extracao.py."""
+    def carregar_fila(self, df: Optional[pd.DataFrame] = None, preservar_ciclo: bool = False) -> None:
+        """Carrega e repovoa as filas em memória a partir dos dados do extracao.py.
+        preservar_ciclo=True mantém a posição do ciclo 2:1 (usado nas atualizações
+        periódicas do painel, para o ciclo não recomeçar a cada leitura do banco)."""
         if df is None:
             if self._extrator is None:
                 self._extrator = ExtratorFila()
@@ -64,7 +66,8 @@ class GerenciadorFilas:
         self._fila_super.clear()
         self._fila_padrao.clear()
         self._fila_convencional.clear()
-        self._resetar_contadores()
+        if not preservar_ciclo:
+            self._resetar_contadores()
 
         if df is None or df.empty:
             return
@@ -81,7 +84,7 @@ class GerenciadorFilas:
             cliente = self._converter_linha_para_cliente(row)
             self._fila_para(cliente.nivel_prioridade).append(cliente)
 
-    def sincronizar_estado(self) -> None:
+    def sincronizar_estado(self, preservar_ciclo: bool = False) -> None:
         """Repovoa as filas em memória a partir do extracao.py (ou repositório legado)."""
         if self._repositorio is not None and hasattr(self._repositorio, "listar_aguardando"):
             clientes = list(self._repositorio.listar_aguardando())
@@ -98,10 +101,11 @@ class GerenciadorFilas:
                 (self._fila_super, self._fila_padrao, self._fila_convencional), novas_filas
             ):
                 destino.extend(origem)
-            self._resetar_contadores()
+            if not preservar_ciclo:
+                self._resetar_contadores()
             return
 
-        self.carregar_fila()
+        self.carregar_fila(preservar_ciclo=preservar_ciclo)
 
     def adicionar_cliente(self, cliente: Cliente) -> None:
         """Adiciona um cliente diretamente à fila de prioridade correspondente."""
@@ -111,7 +115,7 @@ class GerenciadorFilas:
 
         fila.append(cliente)
 
-    def chamar_proximo(self) -> Optional[Cliente]:
+    def chamar_proximo(self, guiche: Optional[int] = None) -> Optional[Cliente]:
         """Retira o próximo cliente elegível aplicando a função aplicar_starvation
         do Alexandre.py (80+ prioridade absoluta + ciclo 2:1).
         Caso exista um repositório configurado, notifica a chamada com rollback local se falhar."""
@@ -134,7 +138,10 @@ class GerenciadorFilas:
 
         if self._repositorio is not None and hasattr(self._repositorio, "registrar_chamada"):
             try:
-                self._repositorio.registrar_chamada(cliente.id)
+                if guiche is None:
+                    self._repositorio.registrar_chamada(cliente.id)
+                else:
+                    self._repositorio.registrar_chamada(cliente.id, guiche)
             except Exception:
                 self._etapa = etapa_anterior
                 self._contador = contador_anterior

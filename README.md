@@ -1,6 +1,6 @@
 # Fila Bancária
 
-Sistema de gerenciamento de filas bancárias com prioridades legais (Leis 13.466/2017, 10.048/2000 e 12.764/2012), controle anti-inanição (Anti-Starvation 3:2:1) desenvolvido em Python, Streamlit e Supabase (PostgreSQL).
+Sistema de gerenciamento de filas bancárias com prioridades legais (Leis 13.466/2017, 10.048/2000 e 12.764/2012), prioridade absoluta para 80+ e controle anti-inanição (ciclo 2:1 entre Prioridade Padrão e Convencional) desenvolvido em Python, Streamlit e Supabase (PostgreSQL).
 
 ---
 
@@ -11,11 +11,17 @@ Copie o arquivo de exemplo:
 cp .env.example .env
 ```
 
-Certifique-se de que o seu `.env` possui o endereço de API do Supabase (terminando em `.supabase.co`):
+Preencha o `.env` com o endereço do projeto (terminando em `.supabase.co`) e a **chave secreta** do Supabase (*Project Settings → API Keys → Secret keys*, começa com `sb_secret_`):
 ```env
-SUPABASE_URL=https://agopdtmcvwqhihofkiyt.supabase.co
-SUPABASE_KEY=sb_publishable_4D4yvKbq8cJehPjnY9v7rg_RjnY-dCI
+SUPABASE_URL=https://<seu-projeto>.supabase.co
+SUPABASE_KEY=sb_secret_...
 ```
+
+> A chave secreta ignora o RLS, por isso **nunca** a coloque no README, em commits ou em código que rode no navegador. O Streamlit roda no servidor, então ela fica protegida no `.env` (local) ou em *Secrets* (Streamlit Cloud). Desde a migration `20261107150000_seguranca_e_atendimentos.sql`, a chave pública (`sb_publishable_`) não acessa mais as tabelas da fila.
+
+### Banco de dados
+Projeto novo: rode `supabase/setup_supabase.sql` no *SQL Editor* do Supabase.
+Projeto já existente: rode só `supabase/migrations/20261107150000_seguranca_e_atendimentos.sql`.
 
 ---
 
@@ -41,6 +47,10 @@ python gerar_clientes.py 50
 streamlit run app.py
 ```
 
-O **Dashboard** aparece no menu lateral (página `pages/Dashboard.py`) e se atualiza sozinho a cada 5 s.
+O **Dashboard** aparece no menu lateral (página `pages/Dashboard.py`) e se atualiza sozinho a cada 5 s. Depois de clicar em **Iniciar sistema**, escolha o guichê e use:
+- **Chamar próximo**: aplica a regra (80+ primeiro, depois 2:1), marca o cliente como `em_atendimento` e grava a linha em `atendimentos`.
+- **Finalizar atendimento**: fecha o atendimento aberto do guichê (`data_finalizado`) e marca o cliente como `atendido`.
+
+Um guichê só chama o próximo depois de finalizar o atual, e dois guichês não conseguem chamar o mesmo cliente (as funções SQL rodam numa transação).
 
 No **Streamlit Community Cloud**, use `app.py` como *Main file* e cadastre `SUPABASE_URL` e `SUPABASE_KEY` em *Secrets*.

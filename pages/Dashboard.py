@@ -1,5 +1,6 @@
 import os
 import json
+import threading
 from datetime import datetime
 
 import streamlit as st
@@ -10,6 +11,7 @@ load_dotenv()
 
 from gerenciador_filas import GerenciadorFilas
 from modelos import NivelPrioridade
+from repositorio import RepositorioSupabase
 
 REFRESH_SEGUNDOS = 5
 HTML_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.html")
@@ -27,41 +29,60 @@ def get_supabase_client():
     return create_client(url, key)
 
 
+@st.cache_resource
+def get_gerenciador():
+    """Um gerenciador por servidor, compartilhado por todos os guichês, para o ciclo 2:1
+    valer para a agência inteira. O lock evita duas chamadas ao mesmo tempo.
+    shortcut: o ciclo 2:1 fica na memória e recomeça se o app reiniciar; persistir no banco se isso importar."""
+    client = get_supabase_client()
+    repositorio = RepositorioSupabase(client) if client else None
+    return GerenciadorFilas(repositorio=repositorio), threading.Lock()
+
+
 def calcular_tempo_medio_espera(supabase_client):
+    """Média de (chamada no guichê - chegada na fila) dos clientes já chamados, em ms."""
     if not supabase_client:
         return None
     try:
-        res = supabase_client.table("atendimentos").select("data_chamada,data_finalizado").not_.is_("data_finalizado", "null").execute()
-        if not res.data:
-            return None
-        total_ms = 0
-        count = 0
-        for row in res.data:
+        res = supabase_client.table("atendimentos").select("data_chamada,clientes_fila!inner(data_chegada)").execute()
+        esperas = []
+        for row in res.data or []:
             try:
-                inicio = datetime.fromisoformat(row["data_chamada"].replace("Z", "+00:00"))
-                fim = datetime.fromisoformat(row["data_finalizado"].replace("Z", "+00:00"))
-                total_ms += (fim - inicio).total_seconds() * 1000
-                count += 1
+                chamada = datetime.fromisoformat(row["data_chamada"].replace("Z", "+00:00"))
+                chegada = datetime.fromisoformat(row["clientes_fila"]["data_chegada"].replace("Z", "+00:00"))
+                esperas.append((chamada - chegada).total_seconds() * 1000)
             except Exception:
                 continue
-        if count == 0:
-            return None
-        return total_ms / count
+        return sum(esperas) / len(esperas) if esperas else None
     except Exception:
         return None
 
 
 def build_payload(sistema_iniciado: bool) -> dict:
-    g = GerenciadorFilas(auto_carregar=True)  # recarrega as filas do Supabase a cada atualização
+    g, lock = get_gerenciador()
+    with lock:
+        g.sincronizar_estado(preservar_ciclo=True)  # recarrega as filas do Supabase
+        tamanhos = g.tamanhos()
+        filas_dict = {"super": [], "padrao": [], "conv": []}
+        for key, nivel in [("super", NivelPrioridade.SUPER_PRIORIDADE), ("padrao", NivelPrioridade.PRIORIDADE_PADRAO), ("conv", NivelPrioridade.CONVENCIONAL)]:
+            for cliente in g._fila_para(nivel):
+                filas_dict[key].append({
+                    "id": cliente.id,
+                    "nome": cliente.nome,
+                    "nivel_prioridade": int(cliente.nivel_prioridade),
+                    "motivo": cliente.motivo,
+                    "data_chegada": cliente.data_chegada.isoformat() if cliente.data_chegada else None,
+                    "status": cliente.status.value,
+                })
+        fase_atual = g.fase_atual()
+        contadores = g.estado_contadores()
 
-    tamanhos = g.tamanhos()
     supabase_client = get_supabase_client()
 
-    total_aguardando = sum(tamanhos.values())
     atendimentos_count = 0
     if supabase_client:
         try:
-            res = supabase_client.table("atendimentos").select("id_chamada", count="exact").execute()
+            res = supabase_client.table("atendimentos").select("id_chamada", count="exact", head=True).execute()
             atendimentos_count = res.count or 0
         except Exception:
             pass
@@ -87,18 +108,6 @@ def build_payload(sistema_iniciado: bool) -> dict:
         except Exception:
             pass
 
-    filas_dict = {"super": [], "padrao": [], "conv": []}
-    for key, nivel in [("super", NivelPrioridade.SUPER_PRIORIDADE), ("padrao", NivelPrioridade.PRIORIDADE_PADRAO), ("conv", NivelPrioridade.CONVENCIONAL)]:
-        for cliente in g._fila_para(nivel):
-            filas_dict[key].append({
-                "id": cliente.id,
-                "nome": cliente.nome,
-                "nivel_prioridade": int(cliente.nivel_prioridade),
-                "motivo": cliente.motivo,
-                "data_chegada": cliente.data_chegada.isoformat() if cliente.data_chegada else None,
-                "status": cliente.status.value,
-            })
-
     distribuicao = {
         "super": tamanhos["super"],
         "padrao": tamanhos["padrao"],
@@ -109,15 +118,15 @@ def build_payload(sistema_iniciado: bool) -> dict:
     return {
         "systemctl": sistema_iniciado,
         "conexao": supabase_client is not None,
-        "total": total_aguardando,
+        "total": sum(tamanhos.values()),
         **distribuicao,
         "atend": atendimentos_count,
         "tmed": tmed,
         "senha_atual": senha_atual,
         "filas": filas_dict,
         "distribuicao": distribuicao,
-        "fase_atual": g.fase_atual(),
-        "contadores": g.estado_contadores(),
+        "fase_atual": fase_atual,
+        "contadores": contadores,
     }
 
 
@@ -127,6 +136,41 @@ def render_html(payload) -> str:
     # "</" escapado para que um nome vindo do banco não feche a tag <script>
     dados = json.dumps(payload, ensure_ascii=False).replace("</", "<\\/")
     return html.replace("const DATA = null;", f"const DATA = {dados};", 1)
+
+
+def mensagem_erro(e: Exception) -> str:
+    """Mensagem do RAISE EXCEPTION do Postgres (APIError.message) ou o texto do erro."""
+    return getattr(e, "message", None) or str(e)
+
+
+def chamar_proximo(guiche: int):
+    g, lock = get_gerenciador()
+    if g._repositorio is None:
+        st.session_state.aviso = ("error", "Supabase não configurado (SUPABASE_URL / SUPABASE_KEY).")
+        return
+    try:
+        with lock:
+            g.sincronizar_estado(preservar_ciclo=True)
+            cliente = g.chamar_proximo(guiche)
+    except Exception as e:
+        st.session_state.aviso = ("error", mensagem_erro(e))
+        return
+    if cliente is None:
+        st.session_state.aviso = ("info", "Ninguém aguardando na fila.")
+    else:
+        st.session_state.aviso = ("success", f"Guichê {guiche}: chamando **{cliente.nome}** ({cliente.motivo or cliente.nivel_prioridade.name}).")
+
+
+def finalizar(guiche: int):
+    g, _ = get_gerenciador()
+    if g._repositorio is None:
+        st.session_state.aviso = ("error", "Supabase não configurado (SUPABASE_URL / SUPABASE_KEY).")
+        return
+    try:
+        g._repositorio.finalizar_atendimento(guiche)
+        st.session_state.aviso = ("success", f"Guichê {guiche}: atendimento finalizado.")
+    except Exception as e:
+        st.session_state.aviso = ("error", mensagem_erro(e))
 
 
 @st.fragment(run_every=REFRESH_SEGUNDOS)
@@ -142,11 +186,23 @@ def painel():
 st.set_page_config(page_title="Fila Bancária — Dashboard", layout="wide")
 st.session_state.setdefault("sistema_iniciado", False)
 
-if st.button(
-    "Sistema iniciado" if st.session_state.sistema_iniciado else "▶ Iniciar sistema",
-    disabled=st.session_state.sistema_iniciado,
-):
-    st.session_state.sistema_iniciado = True
-    st.rerun()
+iniciado = st.session_state.sistema_iniciado
+col_ini, col_guiche, col_chamar, col_finalizar = st.columns([2, 1, 2, 2], vertical_alignment="bottom")
+with col_ini:
+    if st.button("Sistema iniciado" if iniciado else "▶ Iniciar sistema", disabled=iniciado, use_container_width=True):
+        st.session_state.sistema_iniciado = True
+        st.rerun()
+with col_guiche:
+    guiche = st.number_input("Guichê", min_value=1, max_value=99, value=1, step=1)
+with col_chamar:
+    st.button("📣 Chamar próximo", disabled=not iniciado, use_container_width=True,
+              on_click=chamar_proximo, args=(guiche,))
+with col_finalizar:
+    st.button("✅ Finalizar atendimento", disabled=not iniciado, use_container_width=True,
+              on_click=finalizar, args=(guiche,))
+
+if "aviso" in st.session_state:
+    tipo, texto = st.session_state.pop("aviso")
+    getattr(st, tipo)(texto)
 
 painel()

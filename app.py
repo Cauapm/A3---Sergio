@@ -38,8 +38,9 @@ st.success("✅ Conectado com sucesso ao Supabase.")
 try:
     # Verificação rápida das tabelas
     res_tipos = supabase.table("tipo_prioridade").select("*").execute()
-    res_fila = supabase.table("clientes_fila").select("id", count="exact").execute()
-    total_fila = len(res_fila.data) if res_fila.data else 0
+    # count do servidor: não para no limite de 1000 linhas e ignora quem já foi atendido
+    res_fila = supabase.table("clientes_fila").select("id", count="exact", head=True).eq("status", "aguardando").execute()
+    total_fila = res_fila.count or 0
 
     col1, col2 = st.columns(2)
     with col1:

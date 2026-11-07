@@ -261,5 +261,53 @@ class TesteIntegracaoExtracao(unittest.TestCase):
             ])
 
 
+class RepositorioFalso:
+    """Registra as chamadas em memória; falhar=True simula erro do Supabase."""
+    def __init__(self, falhar=False):
+        self.chamadas = []
+        self.falhar = falhar
+
+    def registrar_chamada(self, cliente_id, guiche=1):
+        if self.falhar:
+            raise RuntimeError("Cliente não está mais aguardando.")
+        self.chamadas.append((cliente_id, guiche))
+
+
+class TestAtendimentos(unittest.TestCase):
+    """Chamada com guichê (repositorio.py) e ciclo 2:1 preservado entre leituras do banco."""
+
+    def _df(self):
+        return pd.DataFrame([
+            {"id": f"id-{nome}", "nome": nome, "nivel_prioridade": nivel, "motivo": "",
+             "status": "aguardando", "data_chegada": f"2026-10-09T10:0{i}:00+00:00"}
+            for i, (nome, nivel) in enumerate([("P0", 1), ("P1", 1), ("P2", 1), ("C0", 2)])
+        ])
+
+    def test_chamada_repassa_uuid_e_guiche(self):
+        repo = RepositorioFalso()
+        g = GerenciadorFilas(extrator=ExtratorFalso(self._df()), repositorio=repo)
+        g.sincronizar_estado()
+        g.chamar_proximo(guiche=3)
+        self.assertEqual(repo.chamadas, [("id-P0", 3)])
+
+    def test_falha_no_banco_devolve_cliente_a_fila(self):
+        g = GerenciadorFilas(extrator=ExtratorFalso(self._df()), repositorio=RepositorioFalso(falhar=True))
+        g.sincronizar_estado()
+        with self.assertRaises(RuntimeError):
+            g.chamar_proximo(guiche=1)
+        self.assertEqual(g.tamanhos()["padrao"], 3)
+
+    def test_sincronizar_preservando_ciclo_mantem_2_para_1(self):
+        df = self._df()
+        g = GerenciadorFilas(extrator=ExtratorFalso(df))
+        g.sincronizar_estado()
+        self.assertEqual(g.chamar_proximo().nome, "P0")
+        self.assertEqual(g.chamar_proximo().nome, "P1")
+        # O banco agora só tem quem não foi chamado; recarregar não pode reiniciar o ciclo.
+        g._extrator = ExtratorFalso(df[~df["nome"].isin(["P0", "P1"])])
+        g.sincronizar_estado(preservar_ciclo=True)
+        self.assertEqual(g.chamar_proximo().nome, "C0")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
