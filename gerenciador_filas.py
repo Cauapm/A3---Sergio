@@ -255,7 +255,3 @@ def prova_funcionamento_padrao() -> None:
 if __name__ == "__main__":
     prova_funcionamento_padrao()
 
-
-if __name__ == "__main__":
-    prova_funcionamento_padrao()
-

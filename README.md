@@ -40,3 +40,7 @@ python gerar_clientes.py 50
 ```bash
 streamlit run app.py
 ```
+
+O **Dashboard** aparece no menu lateral (página `pages/Dashboard.py`) e se atualiza sozinho a cada 5 s.
+
+No **Streamlit Community Cloud**, use `app.py` como *Main file* e cadastre `SUPABASE_URL` e `SUPABASE_KEY` em *Secrets*.
