@@ -47,9 +47,12 @@ python gerar_clientes.py 50
 streamlit run app.py
 ```
 
-O **Dashboard** aparece no menu lateral (página `pages/Dashboard.py`) e se atualiza sozinho a cada 5 s. Depois de clicar em **Iniciar sistema** e digitar a senha de operador (`DASHBOARD_SENHA` no `.env` ou em *Secrets*), escolha o guichê e use:
-- **Chamar próximo**: aplica a regra (80+ primeiro, depois 2:1), marca o cliente como `em_atendimento` e grava a linha em `atendimentos`.
-- **Finalizar atendimento**: fecha o atendimento aberto do guichê (`data_finalizado`) e marca o cliente como `atendido`.
+O app tem três páginas no menu lateral:
+- **Início** (`views/inicio.py`): resumo da fila e a ordem de chamada.
+- **Painel de atendimento** (`views/painel.py` + `views/painel.html`): senha atual, as três filas e indicadores, atualizados a cada 5 s. Depois de clicar em **Iniciar atendimento** e digitar a senha de operador na barra lateral (`DASHBOARD_SENHA` no `.env` ou em *Secrets*), escolha o guichê e use:
+  - **Chamar próximo**: aplica a regra (80+ primeiro, depois 2:1), marca o cliente como `em_atendimento` e grava a linha em `atendimentos`.
+  - **Finalizar atendimento**: fecha o atendimento aberto do guichê (`data_finalizado`) e marca o cliente como `atendido`.
+- **Banco de dados** (`views/banco.py`): mostra as tabelas e permite **gerar clientes de demonstração** e **apagar todos os dados** (com confirmação e senha de operador).
 
 Um guichê só chama o próximo depois de finalizar o atual, e dois guichês não conseguem chamar o mesmo cliente (as funções SQL rodam numa transação).
 

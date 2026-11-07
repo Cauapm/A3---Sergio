@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Painel de atendimento</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --papel: #EEF1F4;
+    --superficie: #FFFFFF;
+    --tinta: #14213D;
+    --tinta-suave: #5B6476;
+    --linha: #D5DBE3;
+    --super: #B42318;
+    --padrao: #A15C07;
+    --conv: #2F6F5E;
+    --condensada: 'Archivo', system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--papel);
+    color: var(--tinta);
+    font-family: 'Archivo', system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.45;
+    padding: 4px 2px 24px;
+  }
+  .num { font-family: var(--condensada); font-variation-settings: 'wdth' 62; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+
+  /* Cabeçalho */
+  .topo { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+  .topo h1 { font-size: 26px; font-weight: 700; font-variation-settings: 'wdth' 112; line-height: 1.1; }
+  .topo .agencia { color: var(--tinta-suave); font-size: 14px; margin-top: 2px; }
+  .estado { display: flex; align-items: center; gap: 18px; font-size: 14px; color: var(--tinta-suave); }
+  .estado .relogio { font-size: 30px; color: var(--tinta); }
+  .ponto { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; background: var(--linha); }
+  .ponto.ok { background: var(--conv); }
+  .ponto.falha { background: var(--super); }
+  .ponto.espera { background: var(--padrao); }
+
+  /* Grade principal: ticket + filas */
+  .grade { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; gap: 18px; align-items: start; }
+
+  /* O ticket: o elemento de destaque */
+  .ticket {
+    position: relative;
+    background: var(--superficie);
+    border-radius: 10px;
+    padding: 22px 24px 20px;
+    border-top: 6px solid var(--cor, var(--tinta));
+    -webkit-mask: radial-gradient(circle 11px at 0 62%, transparent 98%, #000) left / 51% 100% no-repeat,
+                  radial-gradient(circle 11px at 100% 62%, transparent 98%, #000) right / 51% 100% no-repeat;
+            mask: radial-gradient(circle 11px at 0 62%, transparent 98%, #000) left / 51% 100% no-repeat,
+                  radial-gradient(circle 11px at 100% 62%, transparent 98%, #000) right / 51% 100% no-repeat;
+  }
+  .ticket .rotulo { font-size: 13px; color: var(--tinta-suave); }
+  .ticket .senha { font-size: 92px; line-height: .95; color: var(--cor, var(--tinta)); margin: 4px 0 6px; }
+  .ticket .categoria { font-weight: 600; color: var(--cor, var(--tinta)); }
+  .ticket .picote { border-top: 2px dashed var(--linha); margin: 18px -24px 16px; }
+  .ticket .linha-info { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .ticket .guiche { font-size: 56px; line-height: 1; }
+  .ticket .nome { font-size: 17px; font-weight: 600; margin-top: 10px; }
+  .ticket .detalhe { font-size: 13px; color: var(--tinta-suave); }
+  .ticket .situacao { display: inline-block; margin-top: 12px; font-size: 13px; font-weight: 600; padding: 3px 10px; border-radius: 999px; background: var(--papel); }
+  .ticket.vazio .senha { color: var(--linha); }
+  .ticket.chamada { animation: chamada 1.2s ease-out 1; }
+  @keyframes chamada { 0% { transform: scale(1.03); box-shadow: 0 0 0 6px color-mix(in srgb, var(--cor) 25%, transparent); } 100% { transform: none; box-shadow: none; } }
+
+  /* Três filas lado a lado */
+  .filas { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
+  .fila { background: var(--superficie); border-radius: 8px; border-left: 4px solid var(--cor); padding: 14px 14px 10px; min-width: 0; }
+  .fila header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .fila h2 { font-size: 16px; font-weight: 700; color: var(--cor); }
+  .fila .qtd { font-size: 34px; line-height: 1; color: var(--cor); }
+  .fila .base { font-size: 12px; color: var(--tinta-suave); margin: 2px 0 10px; }
+  .fila ol { list-style: none; }
+  .fila li { display: grid; grid-template-columns: 26px 1fr auto; gap: 8px; align-items: baseline; padding: 7px 0; border-top: 1px solid var(--papel); }
+  .fila li .pos { font-size: 18px; color: var(--tinta-suave); }
+  .fila li:first-child .pos { color: var(--cor); }
+  .fila li .quem { min-width: 0; }
+  .fila li .quem strong { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fila li .quem span { display: block; font-size: 12px; color: var(--tinta-suave); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fila li time { font-size: 12px; color: var(--tinta-suave); font-variant-numeric: tabular-nums; }
+  .fila .mais { font-size: 13px; color: var(--tinta-suave); padding-top: 8px; border-top: 1px solid var(--papel); }
+  .fila .vazia { font-size: 14px; color: var(--tinta-suave); padding: 10px 0; }
+
+  /* Faixa de indicadores */
+  .faixa { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px; background: var(--papel); border-radius: 8px; overflow: hidden; align-self: stretch; }
+  .faixa div { padding: 18px 22px; background: var(--superficie); display: flex; flex-direction: column; justify-content: center; }
+  .faixa dd { font-size: 52px; }
+  .faixa dt { font-size: 13px; color: var(--tinta-suave); }
+  .faixa dd { line-height: 1.05; }
+  .faixa dd.texto { font-size: 24px; font-family: inherit; font-variation-settings: 'wdth' 100; font-weight: 600; padding-top: 8px; }
+
+  .offline { background: var(--superficie); border-radius: 8px; padding: 28px; text-align: center; color: var(--tinta-suave); }
+
+  @media (max-width: 900px) {
+    .grade { grid-template-columns: 1fr; }
+    .filas { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) { .ticket.chamada { animation: none; } }
+</style>
+</head>
+<body>
+  <header class="topo">
+    <div>
+      <h1>Painel de atendimento</h1>
+      <div class="agencia">Agência 001</div>
+    </div>
+    <div class="estado">
+      <span id="banco"><span class="ponto"></span>Conectando ao banco</span>
+      <span id="sistema"><span class="ponto espera"></span>Atendimento não iniciado</span>
+      <span class="relogio num" id="relogio">--:--</span>
+    </div>
+  </header>
+
+  <main id="conteudo"></main>
+
+  <script>
+  (function () {
+    'use strict';
+    const DATA = null; // substituído pelo Python (views/painel.py)
+
+    const CAT = {
+      0: { chave: 'super',  nome: 'Superprioridade',   base: '80 anos ou mais',                letra: 'S', cor: 'var(--super)' },
+      1: { chave: 'padrao', nome: 'Prioridade padrão', base: 'Idosos 60+, gestantes, PCD, TEA', letra: 'P', cor: 'var(--padrao)' },
+      2: { chave: 'conv',   nome: 'Convencional',      base: 'Sem prioridade legal',            letra: 'C', cor: 'var(--conv)' }
+    };
+    const POR_FILA = 8;
+
+    function esc(s) {
+      if (s === null || s === undefined) return '';
+      return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+    function hora(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      return isNaN(d) ? '' : d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    }
+    function duracao(ms) {
+      if (ms === null || ms === undefined) return '—';
+      const min = Math.round(ms / 60000);
+      if (min < 60) return min + ' min';
+      const h = Math.floor(min / 60);
+      if (h < 48) return h + ' h ' + (min % 60) + ' min';
+      return Math.round(h / 24) + ' dias';
+    }
+    function codigo(t) {
+      const c = CAT[t.nivel_prioridade] || CAT[2];
+      return c.letra + (t.id || '').replace(/-/g, '').slice(0, 3).toUpperCase();
+    }
+    function fase(texto) {
+      if (!texto) return '—';
+      if (texto.startsWith('super')) return 'Superprioridade';
+      if (texto.startsWith('padrao')) return 'Prioridade padrão';
+      if (texto.startsWith('convencional')) return 'Convencional';
+      return texto;
+    }
+
+    function relogio() {
+      document.getElementById('relogio').textContent =
+        new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+
+    function ticket(s) {
+      if (!s) {
+        return `<section class="ticket vazio" aria-label="Senha atual">
+          <div class="rotulo">Senha atual</div>
+          <div class="senha num">—</div>
+          <div class="detalhe">Nenhum cliente chamado ainda.</div>
+          <div class="picote"></div>
+          <div class="detalhe">Use “Chamar próximo” para começar.</div>
+        </section>`;
+      }
+      const c = CAT[s.nivel_prioridade] || CAT[2];
+      const situacao = { em_atendimento: 'Em atendimento', atendido: 'Atendido', aguardando: 'Aguardando' }[s.status] || 'Chamado';
+      return `<section class="ticket" id="ticket" style="--cor:${c.cor}" aria-live="polite" aria-label="Senha atual">
+        <div class="rotulo">Senha atual</div>
+        <div class="senha num">${esc(codigo(s))}</div>
+        <div class="categoria">${c.nome}</div>
+        <div class="picote"></div>
+        <div class="linha-info">
+          <div><div class="rotulo">Guichê</div><div class="guiche num">${esc(s.guiche)}</div></div>
+          <div class="detalhe">Chamada às ${hora(s.data_chamada)}</div>
+        </div>
+        <div class="nome">${esc(s.nome)}</div>
+        <div class="detalhe">${esc(s.motivo)}</div>
+        <span class="situacao">${situacao}</span>
+      </section>`;
+    }
+
+    function fila(nivel, lista) {
+      const c = CAT[nivel];
+      const itens = lista.slice(0, POR_FILA).map((t, i) => `
+        <li>
+          <span class="pos num">${i + 1}</span>
+          <span class="quem"><strong>${esc(t.nome)}</strong><span>${esc(t.motivo)}</span></span>
+          <time>${hora(t.data_chegada)}</time>
+        </li>`).join('');
+      const resto = lista.length - POR_FILA;
+      return `<section class="fila" style="--cor:${c.cor}" aria-label="${c.nome}">
+        <header><h2>${c.nome}</h2><span class="qtd num">${lista.length}</span></header>
+        <div class="base">${c.base}</div>
+        ${lista.length ? `<ol>${itens}</ol>` : '<div class="vazia">Ninguém aguardando.</div>'}
+        ${resto > 0 ? `<div class="mais">e mais ${resto} na fila</div>` : ''}
+      </section>`;
+    }
+
+    function render(d) {
+      const banco = document.getElementById('banco');
+      const sistema = document.getElementById('sistema');
+      const main = document.getElementById('conteudo');
+      if (!d) {
+        banco.innerHTML = '<span class="ponto falha"></span>Banco desconectado';
+        main.innerHTML = '<div class="offline">Não foi possível ler a fila no Supabase. Confira a URL e a chave no .env ou em Secrets.</div>';
+        return;
+      }
+      banco.innerHTML = '<span class="ponto ok"></span>Banco conectado';
+      sistema.innerHTML = d.sistema
+        ? '<span class="ponto ok"></span>Atendimento em andamento'
+        : '<span class="ponto espera"></span>Atendimento não iniciado';
+
+      const f = d.filas || { super: [], padrao: [], conv: [] };
+      main.innerHTML = `
+        <div class="grade">
+          ${ticket(d.senha_atual)}
+          <dl class="faixa">
+            <div><dt>Aguardando</dt><dd class="num">${d.total}</dd></div>
+            <div><dt>Chamadas registradas</dt><dd class="num">${d.atend}</dd></div>
+            <div><dt>Espera média até a chamada</dt><dd class="texto">${duracao(d.tmed)}</dd></div>
+            <div><dt>Próxima vez no ciclo</dt><dd class="texto">${fase(d.fase_atual)}</dd></div>
+          </dl>
+        </div>
+        <div class="filas">${fila(0, f.super)}${fila(1, f.padrao)}${fila(2, f.conv)}</div>`;
+
+      // Destaca o ticket só quando a senha muda (o iframe é recriado a cada mudança de dados).
+      try {
+        const atual = d.senha_atual && (d.senha_atual.id + d.senha_atual.data_chamada);
+        const ultima = sessionStorage.getItem('ultimaSenha');
+        if (atual && ultima && atual !== ultima) document.getElementById('ticket').classList.add('chamada');
+        if (atual) sessionStorage.setItem('ultimaSenha', atual);
+      } catch (e) {}
+    }
+
+    relogio();
+    setInterval(relogio, 1000);
+    render(DATA);
+  })();
+  </script>
+</body>
+</html>

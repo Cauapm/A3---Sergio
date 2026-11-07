@@ -1,51 +1,25 @@
-import os
 import streamlit as st
-from dotenv import load_dotenv
-from supabase import create_client
 
-load_dotenv()
+from conexao import get_credential
 
+st.set_page_config(page_title="Fila Bancária", page_icon="🏦", layout="wide")
 
-def get_credential(name: str):
-    val = os.getenv(name)
-    if not val:
-        try:
-            val = st.secrets.get(name)
-        except Exception:
-            pass
-    return val
+# Números no mesmo estilo condensado do painel (Archivo, largura 62).
+st.html("""<style>
+[data-testid="stMetricValue"] { font-variation-settings: 'wdth' 62; font-weight: 800; font-variant-numeric: tabular-nums; }
+</style>""")
 
+paginas = st.navigation([
+    st.Page("views/inicio.py", title="Início", icon=":material/home:", default=True),
+    st.Page("views/painel.py", title="Painel de atendimento", icon=":material/confirmation_number:"),
+    st.Page("views/banco.py", title="Banco de dados", icon=":material/database:"),
+])
 
-@st.cache_resource
-def get_supabase():
-    url = get_credential("SUPABASE_URL")
-    key = get_credential("SUPABASE_KEY")
-    if not url or not key:
-        st.error(
-            "Defina SUPABASE_URL e SUPABASE_KEY no arquivo .env (local) "
-            "ou nos Secrets do Streamlit Cloud."
-        )
-        st.stop()
-    return create_client(url, key)
+with st.sidebar:
+    st.markdown("**Operador**")
+    st.text_input("Senha do operador", type="password", key="senha_operador",
+                  help="Libera chamar, finalizar, gerar e apagar dados.")
+    if not get_credential("DASHBOARD_SENHA"):
+        st.caption("Defina DASHBOARD_SENHA no .env ou em Secrets para liberar as ações.")
 
-
-st.set_page_config(page_title="Fila Bancária", layout="wide")
-st.title("🏦 Sistema de Gerenciamento de Fila Bancária")
-
-supabase = get_supabase()
-st.success("✅ Conectado com sucesso ao Supabase.")
-
-try:
-    # Verificação rápida das tabelas
-    res_tipos = supabase.table("tipo_prioridade").select("*").execute()
-    # count do servidor: não para no limite de 1000 linhas e ignora quem já foi atendido
-    res_fila = supabase.table("clientes_fila").select("id", count="exact", head=True).eq("status", "aguardando").execute()
-    total_fila = res_fila.count or 0
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Categorias Configuradas", len(res_tipos.data))
-    with col2:
-        st.metric("Clientes Atuais na Fila", total_fila)
-except Exception as e:
-    st.info(f"Aguardando sincronização do schema no Supabase: {e}")
+paginas.run()
