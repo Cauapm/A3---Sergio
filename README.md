@@ -47,10 +47,10 @@ python gerar_clientes.py 50
 streamlit run app.py
 ```
 
-O **Dashboard** aparece no menu lateral (página `pages/Dashboard.py`) e se atualiza sozinho a cada 5 s. Depois de clicar em **Iniciar sistema**, escolha o guichê e use:
+O **Dashboard** aparece no menu lateral (página `pages/Dashboard.py`) e se atualiza sozinho a cada 5 s. Depois de clicar em **Iniciar sistema** e digitar a senha de operador (`DASHBOARD_SENHA` no `.env` ou em *Secrets*), escolha o guichê e use:
 - **Chamar próximo**: aplica a regra (80+ primeiro, depois 2:1), marca o cliente como `em_atendimento` e grava a linha em `atendimentos`.
 - **Finalizar atendimento**: fecha o atendimento aberto do guichê (`data_finalizado`) e marca o cliente como `atendido`.
 
 Um guichê só chama o próximo depois de finalizar o atual, e dois guichês não conseguem chamar o mesmo cliente (as funções SQL rodam numa transação).
 
-No **Streamlit Community Cloud**, use `app.py` como *Main file* e cadastre `SUPABASE_URL` e `SUPABASE_KEY` em *Secrets*.
+No **Streamlit Community Cloud**, use `app.py` como *Main file* e cadastre `SUPABASE_URL`, `SUPABASE_KEY` (secreta) e `DASHBOARD_SENHA` em *Secrets*. O painel fica visível para quem tiver o link; só os botões de atendimento exigem a senha.

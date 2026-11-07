@@ -1,4 +1,5 @@
 import os
+import hmac
 import json
 import threading
 from datetime import datetime
@@ -143,7 +144,20 @@ def mensagem_erro(e: Exception) -> str:
     return getattr(e, "message", None) or str(e)
 
 
+def operador_autorizado() -> bool:
+    """Chamar/finalizar exigem a senha DASHBOARD_SENHA (.env ou Secrets do Streamlit Cloud).
+    Sem senha configurada, os botões ficam bloqueados.
+    shortcut: uma senha para todos os operadores e guichê escolhido na tela; trocar por login
+    (st.login) com guichê vinculado ao usuário se houver operadores diferentes."""
+    senha = os.getenv("DASHBOARD_SENHA")
+    digitada = st.session_state.get("senha_operador", "")
+    return bool(senha) and hmac.compare_digest(digitada.encode(), senha.encode())
+
+
 def chamar_proximo(guiche: int):
+    if not operador_autorizado():
+        st.session_state.aviso = ("error", "Senha de operador incorreta.")
+        return
     g, lock = get_gerenciador()
     if g._repositorio is None:
         st.session_state.aviso = ("error", "Supabase não configurado (SUPABASE_URL / SUPABASE_KEY).")
@@ -162,6 +176,9 @@ def chamar_proximo(guiche: int):
 
 
 def finalizar(guiche: int):
+    if not operador_autorizado():
+        st.session_state.aviso = ("error", "Senha de operador incorreta.")
+        return
     g, _ = get_gerenciador()
     if g._repositorio is None:
         st.session_state.aviso = ("error", "Supabase não configurado (SUPABASE_URL / SUPABASE_KEY).")
@@ -187,6 +204,10 @@ st.set_page_config(page_title="Fila Bancária — Dashboard", layout="wide")
 st.session_state.setdefault("sistema_iniciado", False)
 
 iniciado = st.session_state.sistema_iniciado
+if not os.getenv("DASHBOARD_SENHA"):
+    st.warning("Defina DASHBOARD_SENHA no .env (ou em Secrets no Streamlit Cloud) para liberar os botões de atendimento.")
+st.text_input("Senha do operador", type="password", key="senha_operador")
+liberado = iniciado and operador_autorizado()
 col_ini, col_guiche, col_chamar, col_finalizar = st.columns([2, 1, 2, 2], vertical_alignment="bottom")
 with col_ini:
     if st.button("Sistema iniciado" if iniciado else "▶ Iniciar sistema", disabled=iniciado, use_container_width=True):
@@ -195,10 +216,10 @@ with col_ini:
 with col_guiche:
     guiche = st.number_input("Guichê", min_value=1, max_value=99, value=1, step=1)
 with col_chamar:
-    st.button("📣 Chamar próximo", disabled=not iniciado, use_container_width=True,
+    st.button("📣 Chamar próximo", disabled=not liberado, use_container_width=True,
               on_click=chamar_proximo, args=(guiche,))
 with col_finalizar:
-    st.button("✅ Finalizar atendimento", disabled=not iniciado, use_container_width=True,
+    st.button("✅ Finalizar atendimento", disabled=not liberado, use_container_width=True,
               on_click=finalizar, args=(guiche,))
 
 if "aviso" in st.session_state:
