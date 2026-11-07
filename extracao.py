@@ -14,13 +14,16 @@ class ExtratorFila:
         self.df = None
 
     def gerar_url(self) -> str:
-        """Monta a URL para consumo da API REST do Supabase."""
-        return f"{self.supabase_url}/rest/v1/clientes_fila?apikey={self.supabase_key}"
+        """Monta a URL da API REST do Supabase (só clientes aguardando, em ordem de chegada)."""
+        return f"{self.supabase_url}/rest/v1/clientes_fila?status=eq.aguardando&order=data_chegada.asc"
 
     def converter_pandas(self) -> pd.DataFrame:
-        """Extrai os dados da API e converte para DataFrame, removendo colunas desnecessárias."""
-        self.df = pd.read_json(self.url)
-        self.df = self.df.drop(columns=["id", "id_motivo"], errors="ignore")
+        """Extrai os dados da API e converte para DataFrame.
+        A coluna "id" (UUID) é mantida: é ela que a tabela atendimentos referencia."""
+        # Chave no header, não na URL, para não aparecer em logs.
+        cabecalhos = {"apikey": self.supabase_key, "Authorization": f"Bearer {self.supabase_key}"}
+        self.df = pd.read_json(self.url, storage_options=cabecalhos)
+        self.df = self.df.drop(columns=["id_motivo"], errors="ignore")
         return self.df
 
 if __name__ == "__main__":
